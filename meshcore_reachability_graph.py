@@ -77,6 +77,8 @@ def init_db(db_path: str):
         conn.commit()
     return conn
 
+def formatPath(path_elems: list):
+    return ",".join(path_elems)
 
 def write_node_to_db(conn: sqlite3.Connection, public_key, name, role, latitude, longitude, lastpath):
     """Schreibt/aktualisiert einen Node-Eintrag in der Tabelle 'nodes'."""
@@ -115,69 +117,105 @@ def write_node_to_db(conn: sqlite3.Connection, public_key, name, role, latitude,
     conn.commit()
 
 
-# --- Thread 1: Sammlung von MeshCore-Adverts ------------------------------
+# --- Kombinierter Thread: Adverts sammeln und Pfade verarbeiten ----------
 
 
-def advert_collector_thread(mc: MeshCore, db_path: str, stop_event: threading.Event):
-    """Sammelt MeshCore-Adverts und schreibt Nodes in die DB."""
+def advert_and_path_thread(port: str, db_path: str, stop_event: threading.Event):
+    """Sammelt MeshCore-Adverts, schreibt Nodes in die DB und führt bei Bedarf Traces sequenziell aus."""
 
     async def _run():
-        conn = init_db(db_path)
-        try:
+        mc: MeshCore | None = None
+        subscription = None
 
-            def inspect_package(hex_data):
-                packet = MeshCoreDecoder.decode(hex_data)
-                print(f"  Route Type: {get_route_type_name(packet.route_type)}")
-                print(f"  Payload Type: {get_payload_type_name(packet.payload_type)}")
-                print(f"  Message Hash: {packet.message_hash}")
-                print(f"  Message Path: {packet.path}")
+        async def handle_rf_packet(event):
+            nonlocal mc, subscription
+
+            packet = event.payload
+            if isinstance(packet, dict) and "payload" in packet:
+                packet = MeshCoreDecoder.decode(packet["payload"])
+                # print(f"  Route Type: {get_route_type_name(packet.route_type)}")
+                # print(f"  Payload Type: {get_payload_type_name(packet.payload_type)}")
+                # print(f"  Message Hash: {packet.message_hash}")
+                # print(f"  Message Path: {packet.path}")
 
                 if packet.payload_type == PayloadType.Advert and packet.payload.get("decoded"):
+                    
+                    # detach from further events to focus on path tracing            
+                    mc.unsubscribe(subscription)
+                    
                     advert = packet.payload["decoded"]
                     name = advert.app_data.get("name")
                     roleval = advert.app_data.get("device_role")
                     role = get_device_role_name(roleval) if roleval is not None else None
-                    public_key = advert.public_key
                     latitude = None
                     longitude = None
-                    lastpath = f"{packet.path}"
-                    print(f"  Device Name: {name}")
-                    print(f"  Device Role: {role}")
-                    print(f"  Public Key: {public_key}")
+                    print("")
+                    print(f"Received Advert from {role} {name}, Pubkey-Prefix: {advert.public_key[:8]} via Path {formatPath(packet.path)}")
                     if advert.app_data.get("location"):
                         location = advert.app_data["location"]
                         latitude = location.get("latitude")
                         longitude = location.get("longitude")
-                        print(f"  Location: {latitude}, {longitude}")
-                    write_node_to_db(conn, public_key, name, role, latitude, longitude, lastpath)
-
-            def handle_rf_packet(event):
-                packet = event.payload
-                if isinstance(packet, dict):
-                    print("Raw RF packet received:")
-                    if "snr" in packet:
-                        print(f"  SNR: {packet['snr']:.1f} dB")
-                    if "rssi" in packet:
-                        print(f"  RSSI: {packet['rssi']} dBm")
-                    if "payload_length" in packet:
-                        print(f"  Payload length: {packet['payload_length']} bytes")
-                    if "payload" in packet:
-                        print(f"  Payload (hex): {packet['payload']}")
-                        inspect_package(packet["payload"])
+                        # print(f"  Location: {latitude}, {longitude}")
+                    write_node_to_db(conn, advert.public_key, name, role, latitude, longitude, formatPath(packet.path))
+                    packet.path.insert(0, advert.public_key[:2])
+                    await process_path(packet.path)
+                    # now listen to RX log events again
+                    subscription = mc.subscribe(EventType.RX_LOG_DATA, handle_rf_packet)
                 else:
-                    print(f"RF packet received: {packet}")
+                    print(".", end='')
+                    
+        async def process_path(path):
+            nonlocal mc
 
+            try:
+                path_elems = list(reversed(path))
+
+                prefix = []
+                for elem in path_elems:
+                    prefix.append(elem)
+                    path_id, now_ts = _ensure_path_record(conn, prefix)
+
+                    if _needs_new_trace(conn, path_id, now_ts):
+                        
+                        if len(prefix) == 1:
+                            full_path = list(prefix)
+                        else:
+                            full_path = list(prefix) + list(reversed(prefix[:-1]))
+
+                        full_path_flat = formatPath(full_path)
+                        snr_values = await _execute_trace_for_path_async(mc, full_path_flat)
+                        if not snr_values:
+                            print("Second trace attempt:")
+                            snr_values = await _execute_trace_for_path_async(mc, full_path_flat)
+                        _insert_trace_result(conn, path_id, snr_values)
+                        if not snr_values:
+                            break
+
+            finally:
+                # mc.unsubscribe(subscription)
+                # await mc.disconnect()
+                 await asyncio.sleep(0.1)
+                # mc = await MeshCore.create_serial(port, 115200)
+
+        try:
+            nonlocal_mc: MeshCore | None  # type: ignore[unused-ignore]
+            conn = init_db(db_path)
+
+            print(f"[collector] Connecting to {port}...")
+            mc = await MeshCore.create_serial(port, 115200)
+
+            # last_processed_ts = datetime.now().isoformat(" ", "seconds")
+            print("[collector] Waiting for log data")
+            
             subscription = mc.subscribe(EventType.RX_LOG_DATA, handle_rf_packet)
 
-            print("[collector] Waiting for log data... (Ctrl+C to stop main process)")
-            try:
-                while not stop_event.is_set():
-                    await asyncio.sleep(1)
-            finally:
-                mc.unsubscribe(subscription)
-                conn.close()
+            while not stop_event.is_set():
+                await asyncio.sleep(2)
+
         except Exception as e:
             print(f"[collector] Error: {e}")
+        finally:
+            mc.disconnect()
             conn.close()
 
     asyncio.run(_run())
@@ -215,7 +253,7 @@ def _ensure_path_record(conn: sqlite3.Connection, path_elements):
     """
     c = conn.cursor()
     now_ts = datetime.now().isoformat(" ", "seconds")
-    path_str = ",".join(path_elements)
+    path_str = formatPath(path_elements)
     c.execute("SELECT id, count FROM paths WHERE path = ?", (path_str,))
     row = c.fetchone()
     if row:
@@ -257,6 +295,8 @@ def _needs_new_trace(conn: sqlite3.Connection, path_id: int, now_ts: str) -> boo
 
 async def _execute_trace_for_path_async(mc: MeshCore, full_path):
     """Führt den Trace asynchron aus und gibt JSON-Array der SNR-Werte zurück oder None."""
+    await asyncio.sleep(1)
+
     try:
         import random
 
@@ -264,30 +304,30 @@ async def _execute_trace_for_path_async(mc: MeshCore, full_path):
         result = await mc.commands.send_trace(path=full_path, tag=tag)
 
         if result.type == EventType.ERROR:
-            print(f"Failed to send trace packet: {result.payload.get('reason', 'unknown error')}")
+            print(f"Failed to send trace packet with path={full_path}: {result.payload.get('reason', 'unknown error')}")
             return None
         if result.type != EventType.MSG_SENT:
-            print("Failed to send trace packet")
+            print("Failed to send trace packet with path={full_path}")
             return None
 
-        print(f"Trace packet sent successfully with tag={tag}")
-        print("Waiting for trace response matching our tag...")
-
+        print(f"Sent trace packet with path={full_path} and tag={tag}, waiting for response ...")
+        
         event = await mc.wait_for_event(
             EventType.TRACE_DATA,
             attribute_filters={"tag": tag},
             timeout=15
         )
         if not event:
-            print("No trace response received within timeout")
+            print(f"No trace response received with path={full_path} and tag={tag} within timeout")
             return None
 
         trace = event.payload
-        print("Trace data received:")
-        print(f"  Tag: {trace['tag']}")
-        print(f"  Flags: {trace.get('flags', 0)}")
-        print(f"  Path Length: {trace.get('path_len', 0)}")
+        print(f"Trace data received for path={full_path} and tag={tag}:")
+        # print(f"  Tag: {trace['tag']}")
+        # print(f"  Flags: {trace.get('flags', 0)}")
+        # print(f"  Path Length: {trace.get('path_len', 0)}")
 
+        # FSTODO
         if not trace.get("path"):
             return None
 
@@ -295,9 +335,10 @@ async def _execute_trace_for_path_async(mc: MeshCore, full_path):
         for node in trace["path"]:
             if "snr" not in node:
                 return None
+            # TODO
+            print(f"  {node}")
             snr_list.append(str(node["snr"]))
-
-        # return json.dumps(snr_list)
+        
         return ','.join(snr_list)
 
     except Exception as e:
@@ -313,71 +354,6 @@ def _insert_trace_result(conn: sqlite3.Connection, path_id: int, snr_values: str
         (path_id, now_ts, snr_values),
     )
     conn.commit()
-
-
-def path_processor_thread(mc: MeshCore, db_path: str, stop_event: threading.Event):
-    """Wertet nodes.lastpath aus, pflegt 'paths' und 'traces' und führt Traces direkt aus."""
-    conn = init_db(db_path)
-    print("[paths] Path processor started")
-
-    # async def setup_meshcore():
-    #     return await MeshCore.create_serial(port, 115200)
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    # mc = loop.run_until_complete(setup_meshcore())
-
-    last_processed_ts = datetime.now().isoformat(" ", "seconds")
-
-    try:
-        while not stop_event.is_set():
-            c = conn.cursor()
-            c.execute(
-                "SELECT public_key, lastpath, lastmod FROM nodes WHERE lastpath IS NOT NULL AND lastmod > ? ORDER BY lastmod ASC",
-                (last_processed_ts,),
-            )
-            rows = c.fetchall()
-
-            for public_key, raw_lastpath, node_lastmod in rows:
-                if node_lastmod > last_processed_ts:
-                    last_processed_ts = node_lastmod
-
-                path_elems = _parse_lastpath(raw_lastpath)
-                if not path_elems:
-                    continue
-
-                path_elems = list(reversed(path_elems))
-
-                prefix = []
-                for elem in path_elems:
-                    prefix.append(elem)
-                    path_id, now_ts = _ensure_path_record(conn, prefix)
-
-                    if not _needs_new_trace(conn, path_id, now_ts):
-                        continue
-
-                    if len(prefix) <= 1:
-                        full_path = list(prefix)
-                    else:
-                        full_path = list(prefix) + list(reversed(prefix[:-1]))
-
-                    full_path_flat = ','.join(full_path)
-                    snr_values = loop.run_until_complete(_execute_trace_for_path_async(mc, full_path_flat))
-                    # snr_values = await _execute_trace_for_path_async(mc, full_path_flat)
-                    if not snr_values:
-                        snr_values = loop.run_until_complete(_execute_trace_for_path_async(mc, full_path_flat))
-                        # snr_values = await _execute_trace_for_path_async(mc, full_path_flat)
-                    _insert_trace_result(conn, path_id, snr_values)
-                    if not snr_values:
-                        break
-
-            time.sleep(1)
-
-    finally:
-        # loop.run_until_complete(mc.disconnect())
-        loop.close()
-        conn.close()
-        print("[paths] Path processor stopped")
 
 
 # --- Thread 3: Visualisierung (Dash + Cytoscape) --------------------------
@@ -524,7 +500,7 @@ def dash_server_thread(db_path: str, stop_event: threading.Event):
     app.run(host="0.0.0.0", port=5342, debug=True)
 
 
-# --- main() wurde laut Vorgabe bereits ans Zieldatenmodell angepasst -------
+# --- main() -------
 
 
 async def main():
@@ -538,23 +514,12 @@ async def main():
     args = parser.parse_args()
 
     db_path = args.db
-    port = args.port
     stop_event = threading.Event()
-    
-    print(f"[collector] Connecting to {port}...")
-    mc = await MeshCore.create_serial(port, 115200)
 
-    # Thread 1: Adverts einsammeln und in 'nodes' schreiben
-    t_collect = threading.Thread(
-        target=advert_collector_thread,
-        args=(mc, db_path, stop_event),
-        daemon=True,
-    )
-
-    # Thread 2: Pfad-Auswertung und direkte Trace-Ausführung
-    t_paths = threading.Thread(
-        target=path_processor_thread,
-        args=(mc, db_path, stop_event),
+    # Kombinierter Thread: Adverts einsammeln, Pfade auswerten und Traces sequenziell ausführen
+    t_collect_paths = threading.Thread(
+        target=advert_and_path_thread,
+        args=(args.port, db_path, stop_event),
         daemon=True,
     )
 
@@ -565,11 +530,10 @@ async def main():
         daemon=True,
     )
 
-    t_collect.start()
-    t_paths.start()
+    t_collect_paths.start()
     # t_dash.start()
-    
-    print("[main] Threads started (collector, paths, dash). Press Ctrl+C to stop.")
+
+    print("[main] Threads started (collector+paths, dash). Press Ctrl+C to stop.")
 
     try:
         while True:
@@ -580,7 +544,7 @@ async def main():
         # kurze Wartezeit für sauberes Beenden der Nicht-Dash-Threads
         await asyncio.sleep(2)
         
-    await mc.disconnect()
+    # await mc.disconnect()
 
 
 if __name__ == "__main__":
