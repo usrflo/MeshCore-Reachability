@@ -518,22 +518,6 @@ def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None):
     def map_coords_to_latlon(lon, lat):
         return [lat, lon]
 
-    # cy_nodes = []
-    node_markers = []
-    for n, meta in node_meta.items():
-        # data = {"id": n, "label": node_label(n)}
-        # data.update(meta)
-        # node_dict = {"data": data}
-        if val_ok(meta["longitude"]) and val_ok(meta["latitude"]):
-            # cy_nodes.append(node_dict)
-            node_markers.append(
-                dl.Marker(
-                    id=f"node-marker-{meta["public_key"]}",
-                    position=map_coords_to_latlon(meta["longitude"], meta["latitude"]),
-                    children=dl.Tooltip(content=f"{meta["role"]} {meta["name"]}<br/>Latest Path: {meta["lastpath"] or "<direkt>"}"),
-                )
-            )
-
     # Leaflet-Kartenmitte bestimmen
     if coords:
         center_lat = (min_lat + max_lat) / 2
@@ -615,6 +599,10 @@ def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None):
                         children=dl.Tooltip(
                             content=f"{meta['role']} {meta['name']}<br/>Latest Path: {meta['lastpath'] or '<direkt>'}"
                         ),
+                        icon={
+                            "iconUrl": dash.get_asset_url(f"{meta["role"].lower().replace(' ', '-')}.svg"),
+                            "iconSize": "20"
+                        }
                     )
                 )
         return markers
