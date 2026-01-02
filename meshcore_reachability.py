@@ -185,6 +185,7 @@ def advert_and_path_thread(port: str, db_path: str, stop_event: threading.Event)
                     if last_advert_hour is None or current_hour != last_advert_hour:
                         last_advert_hour = current_hour
                         await mc.commands.send_advert(True)
+                        print("Sent hourly flood advert so peers can respond upon requests")
                         await asyncio.sleep(3)
 
                     # process the foreign advert
@@ -378,7 +379,7 @@ def _needs_new_trace(conn: sqlite3.Connection, path_id: int, now_ts: str) -> tup
 
     1. Return Value:
     - Wenn kein Trace-Eintrag existiert -> True
-    - Wenn letzter Trace älter als 24 Stunden -> True
+    - Wenn letzter Trace älter als 72 Stunden -> True
     2. Return Value:
     - Falls der letzte Trace fehlgeschlagen ist --> True
     """
@@ -393,7 +394,7 @@ def _needs_new_trace(conn: sqlite3.Connection, path_id: int, now_ts: str) -> tup
     last_ts = datetime.fromisoformat(row[0])
     now_dt = datetime.fromisoformat(now_ts)
     delta = now_dt - last_ts
-    return delta.total_seconds() > 3600*24, row[1] is None # > 24 Stunden
+    return delta.total_seconds() > 3600*72, row[1] is None # > 72 Stunden
 
 
 async def _execute_trace_for_path_async(mc: MeshCore, full_path):
@@ -609,9 +610,11 @@ def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None):
         zoom = 8
 
     app = dash.Dash(__name__)
-    app.layout = html.Div(
-        className="app-root",
-        children=[
+    app.layout = dcc.Loading(
+        type="circle",
+        children=html.Div(
+            className="app-root",
+            children=[
             html.H2(
                 "MeshCore Reachability",
                 className="app-title",
@@ -731,7 +734,8 @@ def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None):
                 n_intervals=0,
             ),
         ],
-    )
+        ),
+        )
 
     @app.callback(
         Output("node-meta-store", "data"),
