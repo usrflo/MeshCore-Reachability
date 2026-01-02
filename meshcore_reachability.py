@@ -18,6 +18,10 @@ from datetime import datetime
 import json
 import random
 from urllib.parse import urlencode
+import base64
+import io
+
+import qrcode
 
 
 # --- DB-Helferfunktionen -------------------------------------------------
@@ -602,12 +606,23 @@ def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None):
                     role_id=3
 
                 mclink = f"meshcore://contact/add?{urlencode({"name": meta.get("name")})}&public_key={meta["public_key"]}&type={role_id}"
+
+                # QR-Code für mclink erzeugen (lokal, ohne externen Dienst)
+                qr = qrcode.QRCode(box_size=4, border=2)
+                qr.add_data(mclink)
+                qr.make(fit=True)
+                img = qr.make_image(fill_color="black", back_color="white")
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                img_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+                mclink_qr_data_url = f"data:image/png;base64,{img_b64}"
+
                 markers.append(
                     dl.Marker(
                         id=f"node-marker-{meta["public_key"]}",
                         position=map_coords_to_latlon(meta["longitude"], meta["latitude"]),
                         children=dl.Tooltip(
-                            content=f"{meta['role']} {meta['name']}<br/>Latest Path: {meta["lastpath"] or "[direct]"}<br/>{mclink}"
+                            content=f"<b>{meta['role']} {meta['name']}</b><br/>Latest Path: {meta["lastpath"] or "[direct]"}<br/>Public-Key: {meta["public_key"][:10]}...<br/><img src='{mclink_qr_data_url}' alt='MC-Link QR Code'/>"
                         ),
                         icon={
                             "iconUrl": dash.get_asset_url(f"{meta["role"].lower().replace(' ', '-')}{"_reachable" if meta["reachable"]==1 else ""}.svg"),
