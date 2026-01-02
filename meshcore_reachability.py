@@ -17,6 +17,7 @@ import os
 from datetime import datetime
 import json
 import random
+from urllib.parse import urlencode
 
 
 # --- DB-Helferfunktionen -------------------------------------------------
@@ -534,7 +535,8 @@ def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None):
             html.H2("MeshCore Reachability"),
             dcc.Checklist(
                 id="reachable-filter",
-                options=[{"label": "reachable nodes: bidirectional, checked latest path from adverts", "value": "reachable_only"}],
+                # : bidirectional, checked latest path from adverts
+                options=[{"label": "show reachable nodes only", "value": "reachable_only"}],
                 value=[],
                 style={"margin": "8px 0"},
             ),
@@ -592,12 +594,20 @@ def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None):
             if show_reachable_only and meta.get("reachable", 0) == 0:
                 continue
             if val_ok(meta.get("longitude")) and val_ok(meta.get("latitude")):
+                
+                role_id=1
+                if meta.get("role")=="Repeater":
+                    role_id=2
+                elif meta.get("role")=="Room Server":
+                    role_id=3
+
+                mclink = f"meshcore://contact/add?{urlencode({"name": meta.get("name")})}&public_key={meta["public_key"]}&type={role_id}"
                 markers.append(
                     dl.Marker(
                         id=f"node-marker-{meta["public_key"]}",
                         position=map_coords_to_latlon(meta["longitude"], meta["latitude"]),
                         children=dl.Tooltip(
-                            content=f"{meta['role']} {meta['name']}<br/>Latest Path: {meta['lastpath'] or '<direkt>'}"
+                            content=f"{meta['role']} {meta['name']}<br/>Latest Path: {meta["lastpath"] or "[direct]"}<br/>{mclink}"
                         ),
                         icon={
                             "iconUrl": dash.get_asset_url(f"{meta["role"].lower().replace(' ', '-')}{"_reachable" if meta["reachable"]==1 else ""}.svg"),
