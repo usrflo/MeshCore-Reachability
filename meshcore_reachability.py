@@ -603,96 +603,310 @@ def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None):
         zoom = 8
 
     app = dash.Dash(__name__)
+    # app.index_string = """<!DOCTYPE html>\n<html>\n    <head>\n        {%metas%}\n        <title>{%title%}</title>\n        {%favicon%}\n        {%css%}\n        <style>html, body { margin: 0; padding: 0; }</style>\n    </head>\n    <body>\n        {%app_entry%}\n        <footer>\n            {%config%}\n            {%scripts%}\n            {%renderer%}\n        </footer>\n    </body>\n</html>\n"""
     app.layout = html.Div(
-        [
-            html.H2("MeshCore Reachability"),
+        style={
+            "minHeight": "100vh",
+            "backgroundColor": "#121212",
+            "color": "#f5f5f5",
+            "fontFamily": "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            "padding": "16px 24px",
+        },
+        children=[
+            html.H2(
+                "MeshCore Reachability",
+                style={
+                    "margin": "0 0 12px 0",
+                    "fontWeight": "600",
+                    "letterSpacing": "0.03em",
+                },
+            ),
             dcc.Checklist(
                 id="reachable-filter",
                 # : bidirectional, checked latest path from adverts
                 options=[{"label": "show reachable nodes only", "value": "reachable_only"}],
                 value=[],
-                style={"margin": "8px 0"},
+                style={"margin": "8px 0 16px 0", "color": "#f5f5f5"},
+                inputStyle={"marginRight": "6px", "accentColor": "#00bcd4"},
+                labelStyle={"marginRight": "12px", "cursor": "pointer"},
             ),
-            dl.Map(
-                center=[center_lat, center_lon],
-                zoom=zoom,
-                style={"width": "100%", "height": "800px", "position": "relative"},
+            html.Div(
+                style={
+                    "borderRadius": "10px",
+                    "overflow": "hidden",
+                    "boxShadow": "0 0 0 1px rgba(255,255,255,0.05), 0 18px 45px rgba(0,0,0,0.65)",
+                    "marginBottom": "20px",
+                },
                 children=[
-                    dl.TileLayer(
-                        url=(
-                            f"https://api.maptiler.com/maps/topo-v4/{{z}}/{{x}}/{{y}}.png?key={maptiler_api_key}"
-                            if maptiler_api_key
-                            else "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                        ),
-                        attribution=(
-                            "<a href='https://www.maptiler.com/copyright/' target='_blank'>&copy; MapTiler</a> "
-                            "<a href='https://www.openstreetmap.org/copyright' target='_blank'>&copy; OpenStreetMap contributors</a>"
-                            if maptiler_api_key
-                            else "&copy; OpenStreetMap contributors"
-                        ),
-                        tileSize=512 if maptiler_api_key else 256,
-                        zoomOffset=-1 if maptiler_api_key else 0,
+                    dl.Map(
+                        center=[center_lat, center_lon],
+                        zoom=zoom,
+                        style={
+                            "width": "100%",
+                            "height": "800px",
+                            "position": "relative",
+                            "backgroundColor": "#000",
+                        },
+                        children=[
+                            dl.TileLayer(
+                                url=(
+                                    f"https://api.maptiler.com/maps/topo-v4/{{z}}/{{x}}/{{y}}.png?key={maptiler_api_key}"
+                                    if maptiler_api_key
+                                    else "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                                ),
+                                attribution=(
+                                    "<a href='https://www.maptiler.com/copyright/' target='_blank'>&copy; MapTiler</a> "
+                                    "<a href='https://www.openstreetmap.org/copyright' target='_blank'>&copy; OpenStreetMap contributors</a>"
+                                    if maptiler_api_key
+                                    else "&copy; OpenStreetMap contributors"
+                                ),
+                                tileSize=512 if maptiler_api_key else 256,
+                                zoomOffset=-1 if maptiler_api_key else 0,
+                            ),
+                            dl.LayerGroup(id="node-layer"),
+                        ],
                     ),
-                    dl.LayerGroup(id="node-layer"),
                 ],
             ),
             html.Div(
                 id="stats-container",
-                style={"margin-top": "16px"},
+                style={
+                    "marginTop": "16px",
+                    "padding": "16px 20px",
+                    "borderRadius": "10px",
+                    "backgroundColor": "#1e1e1e",
+                    "boxShadow": "0 12px 30px rgba(0,0,0,0.6)",
+                },
                 children=[
                     html.Table(
-                        style={"border-collapse": "collapse", "width": "100%", "max-width": "1000px"},
+                        style={
+                            "borderCollapse": "collapse",
+                            "width": "100%",
+                            "maxWidth": "1000px",
+                            "fontSize": "14px",
+                        },
                         children=[
                             html.Thead(
                                 children=html.Tr(
                                     children=[
-                                        html.Th("", style={"text-align": "left", "border-bottom": "1px solid #ccc", "padding": "4px"}),
-                                        html.Th("Adverts received", style={"text-align": "center", "border-bottom": "1px solid #ccc", "padding": "4px"}),
-                                        html.Th("Reachable Nodes", style={"text-align": "right", "border-bottom": "1px solid #ccc", "padding": "4px"}),
-                                    ]
-                                )
+                                        html.Th(
+                                            "",
+                                            style={
+                                                "textAlign": "left",
+                                                "borderBottom": "1px solid #333",
+                                                "padding": "6px 4px",
+                                                "color": "#bbbbbb",
+                                                "fontWeight": "500",
+                                                "textTransform": "uppercase",
+                                                "fontSize": "11px",
+                                                "letterSpacing": "0.08em",
+                                            },
+                                        ),
+                                        html.Th(
+                                            "Adverts received",
+                                            style={
+                                                "textAlign": "center",
+                                                "borderBottom": "1px solid #333",
+                                                "padding": "6px 4px",
+                                                "color": "#bbbbbb",
+                                                "fontWeight": "500",
+                                                "textTransform": "uppercase",
+                                                "fontSize": "11px",
+                                                "letterSpacing": "0.08em",
+                                            },
+                                        ),
+                                        html.Th(
+                                            "Reachable Nodes",
+                                            style={
+                                                "textAlign": "right",
+                                                "borderBottom": "1px solid #333",
+                                                "padding": "6px 4px",
+                                                "color": "#bbbbbb",
+                                                "fontWeight": "500",
+                                                "textTransform": "uppercase",
+                                                "fontSize": "11px",
+                                                "letterSpacing": "0.08em",
+                                            },
+                                        ),
+                                    ],
+                                ),
                             ),
                             html.Tbody(
                                 children=[
                                     html.Tr(
                                         children=[
-                                            html.Td("Chat Nodes", style={"padding": "4px", "border-bottom": "1px solid #eee"}),
-                                            html.Td(id="stat-chatnodes-rcvd", style={"padding": "4px", "border-bottom": "1px solid #eee", "text-align": "center"}),
-                                            html.Td(id="stat-chatnodes-reach", style={"padding": "4px", "border-bottom": "1px solid #eee", "text-align": "right"}),
-                                        ]
+                                            html.Td(
+                                                "Chat Nodes",
+                                                style={
+                                                    "padding": "6px 4px",
+                                                    "borderBottom": "1px solid #272727",
+                                                    "color": "#e0e0e0",
+                                                },
+                                            ),
+                                            html.Td(
+                                                id="stat-chatnodes-rcvd",
+                                                style={
+                                                    "padding": "6px 4px",
+                                                    "borderBottom": "1px solid #272727",
+                                                    "textAlign": "center",
+                                                    "color": "#81d4fa",
+                                                    "fontVariantNumeric": "tabular-nums",
+                                                },
+                                            ),
+                                            html.Td(
+                                                id="stat-chatnodes-reach",
+                                                style={
+                                                    "padding": "6px 4px",
+                                                    "borderBottom": "1px solid #272727",
+                                                    "textAlign": "right",
+                                                    "color": "#aed581",
+                                                    "fontVariantNumeric": "tabular-nums",
+                                                },
+                                            ),
+                                        ],
                                     ),
                                     html.Tr(
                                         children=[
-                                            html.Td("Repeaters", style={"padding": "4px", "border-bottom": "1px solid #eee"}),
-                                            html.Td(id="stat-repeaters-rcvd", style={"padding": "4px", "border-bottom": "1px solid #eee", "text-align": "center"}),
-                                            html.Td(id="stat-repeaters-reach", style={"padding": "4px", "border-bottom": "1px solid #eee", "text-align": "right"}),
-                                        ]
+                                            html.Td(
+                                                "Repeaters",
+                                                style={
+                                                    "padding": "6px 4px",
+                                                    "borderBottom": "1px solid #272727",
+                                                    "color": "#e0e0e0",
+                                                },
+                                            ),
+                                            html.Td(
+                                                id="stat-repeaters-rcvd",
+                                                style={
+                                                    "padding": "6px 4px",
+                                                    "borderBottom": "1px solid #272727",
+                                                    "textAlign": "center",
+                                                    "color": "#81d4fa",
+                                                    "fontVariantNumeric": "tabular-nums",
+                                                },
+                                            ),
+                                            html.Td(
+                                                id="stat-repeaters-reach",
+                                                style={
+                                                    "padding": "6px 4px",
+                                                    "borderBottom": "1px solid #272727",
+                                                    "textAlign": "right",
+                                                    "color": "#aed581",
+                                                    "fontVariantNumeric": "tabular-nums",
+                                                },
+                                            ),
+                                        ],
                                     ),
                                     html.Tr(
                                         children=[
-                                            html.Td("Room Servers", style={"padding": "4px", "border-bottom": "1px solid #eee"}),
-                                            html.Td(id="stat-roomservers-rcvd", style={"padding": "4px", "border-bottom": "1px solid #eee", "text-align": "center"}),
-                                            html.Td(id="stat-roomservers-reach", style={"padding": "4px", "border-bottom": "1px solid #eee", "text-align": "right"}),
-                                        ]
+                                            html.Td(
+                                                "Room Servers",
+                                                style={
+                                                    "padding": "6px 4px",
+                                                    "borderBottom": "1px solid #272727",
+                                                    "color": "#e0e0e0",
+                                                },
+                                            ),
+                                            html.Td(
+                                                id="stat-roomservers-rcvd",
+                                                style={
+                                                    "padding": "6px 4px",
+                                                    "borderBottom": "1px solid #272727",
+                                                    "textAlign": "center",
+                                                    "color": "#81d4fa",
+                                                    "fontVariantNumeric": "tabular-nums",
+                                                },
+                                            ),
+                                            html.Td(
+                                                id="stat-roomservers-reach",
+                                                style={
+                                                    "padding": "6px 4px",
+                                                    "borderBottom": "1px solid #272727",
+                                                    "textAlign": "right",
+                                                    "color": "#aed581",
+                                                    "fontVariantNumeric": "tabular-nums",
+                                                },
+                                            ),
+                                        ],
                                     ),
-                                ]
+                                ],
                             ),
                         ],
                     ),
-                    html.P(id="stat-checked-paths", style={"margin-top": "12px"}),
-                    html.H3("Nodes without geo location:", style={"margin-top": "16px"}),
+                    html.P(
+                        id="stat-checked-paths",
+                        style={"marginTop": "16px", "color": "#b0bec5", "fontSize": "13px"},
+                    ),
+                    html.H3(
+                        "Nodes without geo location:",
+                        style={
+                            "marginTop": "20px",
+                            "marginBottom": "8px",
+                            "fontSize": "16px",
+                            "fontWeight": "500",
+                        },
+                    ),
                     html.Table(
-                        style={"border-collapse": "collapse", "width": "100%", "max-width": "1000px"},
+                        style={
+                            "borderCollapse": "collapse",
+                            "width": "100%",
+                            "maxWidth": "1000px",
+                            "fontSize": "13px",
+                        },
                         children=[
                             html.Thead(
                                 children=html.Tr(
                                     children=[
-                                        html.Th("Name", style={"text-align": "left", "border-bottom": "1px solid #ccc", "padding": "4px"}),
-                                        html.Th("Role", style={"text-align": "left", "border-bottom": "1px solid #ccc", "padding": "4px"}),
-                                        html.Th("Public-Key", style={"text-align": "left", "border-bottom": "1px solid #ccc", "padding": "4px"}),
-                                        html.Th("Contact-QR-Code", style={"text-align": "left", "border-bottom": "1px solid #ccc", "padding": "4px"}),
-                                    ]
-                                )
+                                        html.Th(
+                                            "Name",
+                                            style={
+                                                "textAlign": "left",
+                                                "borderBottom": "1px solid #333",
+                                                "padding": "6px 4px",
+                                                "color": "#bbbbbb",
+                                                "fontSize": "11px",
+                                                "textTransform": "uppercase",
+                                                "letterSpacing": "0.08em",
+                                            },
+                                        ),
+                                        html.Th(
+                                            "Role",
+                                            style={
+                                                "textAlign": "left",
+                                                "borderBottom": "1px solid #333",
+                                                "padding": "6px 4px",
+                                                "color": "#bbbbbb",
+                                                "fontSize": "11px",
+                                                "textTransform": "uppercase",
+                                                "letterSpacing": "0.08em",
+                                            },
+                                        ),
+                                        html.Th(
+                                            "Public-Key",
+                                            style={
+                                                "textAlign": "left",
+                                                "borderBottom": "1px solid #333",
+                                                "padding": "6px 4px",
+                                                "color": "#bbbbbb",
+                                                "fontSize": "11px",
+                                                "textTransform": "uppercase",
+                                                "letterSpacing": "0.08em",
+                                            },
+                                        ),
+                                        html.Th(
+                                            "Contact-QR-Code",
+                                            style={
+                                                "textAlign": "left",
+                                                "borderBottom": "1px solid #333",
+                                                "padding": "6px 4px",
+                                                "color": "#bbbbbb",
+                                                "fontSize": "11px",
+                                                "textTransform": "uppercase",
+                                                "letterSpacing": "0.08em",
+                                            },
+                                        ),
+                                    ],
+                                ),
                             ),
                             html.Tbody(id="nodes-without-geo-body"),
                         ],
@@ -702,12 +916,15 @@ def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None):
             html.Div(
                 id="node-details-overlay",
                 style={
-                    "margin": "16px",
-                    "padding": "8px",
-                    "border": "1px solid #ccc",
+                    "margin": "16px 0 0 0",
+                    "padding": "10px 12px",
+                    "borderRadius": "8px",
+                    "border": "1px solid #333",
                     "display": "none",
-                    "background": "#fafafa",
-                    "white-space": "pre",
+                    "background": "#181818",
+                    "whiteSpace": "pre",
+                    "fontFamily": "monospace",
+                    "fontSize": "12px",
                 },
             ),
             dcc.Store(id="node-meta-store", data=node_meta),
@@ -716,8 +933,8 @@ def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None):
                 interval=2 * 60 * 1000,  # 2 Minuten
                 n_intervals=0,
             ),
-            ]
-            )
+        ],
+    )
 
     @app.callback(
         Output("node-meta-store", "data"),
@@ -825,13 +1042,19 @@ def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None):
         for meta in nodes_no_geo_sorted:
             mclink_qr_data_url = get_mclink_qr(meta)
 
-            name_style = {"padding": "4px", "border-bottom": "1px solid #eee"}
+            name_style = {
+                "padding": "6px 4px",
+                "borderBottom": "1px solid #272727",
+                "color": "#e0e0e0",
+            }
             if meta.get("reachable") == 1:
-                name_style = {
-                    "padding": "4px",
-                    "border-bottom": "1px solid #eee",
-                    "color": "blue",
-                }
+                name_style["color"] = "#81d4fa"
+
+            cell_style = {
+                "padding": "6px 4px",
+                "borderBottom": "1px solid #272727",
+                "color": "#e0e0e0",
+            }
 
             rows_no_geo.append(
                 html.Tr(
@@ -839,18 +1062,18 @@ def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None):
                         html.Td(meta.get("name") or "", style=name_style),
                         html.Td(
                             meta.get("role") or "",
-                            style={"padding": "4px", "border-bottom": "1px solid #eee"},
+                            style=cell_style,
                         ),
                         html.Td(
                             meta.get("public_key") or "",
-                            style={"padding": "4px", "border-bottom": "1px solid #eee"},
+                            style=cell_style,
                         ),
                         html.Td(
                             html.Img(
                                 src=mclink_qr_data_url,
                                 style={"height": "64px", "width": "64px"},
                             ),
-                            style={"padding": "4px", "border-bottom": "1px solid #eee"},
+                            style=cell_style,
                         ),
                     ]
                 )
