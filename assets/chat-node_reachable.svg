@@ -4,7 +4,7 @@
    height="681.8"
    version="1.1"
    id="svg1872"
-   sodipodi:docname="chat-node.svg"
+   sodipodi:docname="chat-node_reachable.svg"
    inkscape:version="1.2.2 (b0a8486541, 2022-12-01)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
@@ -33,7 +33,7 @@
      inkscape:current-layer="svg1872" />
   <path
      d="M114 681c-15-3-30-16-37-31l-4-9V230l4-9c6-12 15-21 27-27l9-4h69l69-1V34l4-8c5-10 13-18 22-22 10-5 25-5 35 0 9 4 16 11 20 20l3 6 1 81 1 81 7 3c9 5 16 11 22 20 9 15 9 3 8 225v198l-3 8c-7 16-17 27-32 33l-8 3H225l-111-1zm127-57c17-5 36-21 44-38 19-41-4-89-47-99-23-5-45 1-63 19a65 65 0 0 0-20 50c0 23 10 43 28 57 17 12 37 16 58 11zm87-226-1-19H119v38h209zm0-57v-18H119v37h209zm0-57v-19H119v39h104l104-1Z"
-     style="fill:#ff2a2a;stroke-width:1.33333"
+     style="fill:#0000ff;stroke-width:1.33333"
      transform="translate(113)"
      id="path1868" />
 </svg>

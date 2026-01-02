@@ -600,8 +600,10 @@ def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None):
                             content=f"{meta['role']} {meta['name']}<br/>Latest Path: {meta['lastpath'] or '<direkt>'}"
                         ),
                         icon={
-                            "iconUrl": dash.get_asset_url(f"{meta["role"].lower().replace(' ', '-')}.svg"),
-                            "iconSize": "20"
+                            "iconUrl": dash.get_asset_url(f"{meta["role"].lower().replace(' ', '-')}{"_reachable" if meta["reachable"]==1 else ""}.svg"),
+                            "iconSize": "24",
+                            "shadowUrl": dash.get_asset_url("iconbg.svg"),
+                            "shadowSize": "28"
                         }
                     )
                 )
