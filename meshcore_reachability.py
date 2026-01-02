@@ -458,6 +458,10 @@ def _insert_trace_result(conn: sqlite3.Connection, path_id: int, snr_values: str
 
 def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None):
     mclink_qr_cache: dict[str, str] = {}
+    statistics: dict[str,str] = {"chatnodes_rcvd_adverts":"", "chatnodes_reachable":"",
+                                 "repeaters_rcvd_adverts":"", "repeaters_reachable":"",
+                                 "roomservers_rcvd_adverts":"", "roomservers_reachable":"",
+                                 "checked_paths":""}
     import dash
     from dash import html, dcc, Output, Input, State
     import dash_leaflet as dl
@@ -485,6 +489,63 @@ def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None):
             FROM nodes AS n"""
         )
         rows = c.fetchall()
+
+        # Statistikwerte aus DB ermitteln
+        # Chat Nodes
+        c.execute("SELECT COUNT(*) FROM nodes WHERE role = 'Chat Node'")
+        statistics["chatnodes_rcvd_adverts"] = c.fetchone()[0]
+        c.execute(
+            """SELECT COUNT(*)
+            FROM nodes AS n
+            WHERE n.role = 'Chat Node'
+            AND EXISTS (
+                SELECT 1
+                FROM paths AS p
+                JOIN traces AS t ON t.path_id = p.id
+                WHERE p.target_node = n.public_key
+                AND t.snr_values IS NOT NULL
+            )"""
+        )
+        statistics["chatnodes_reachable"] = c.fetchone()[0]
+
+        # Repeaters
+        c.execute("SELECT COUNT(*) FROM nodes WHERE role = 'Repeater'")
+        statistics["repeaters_rcvd_adverts"] = c.fetchone()[0]
+        c.execute(
+            """SELECT COUNT(*)
+            FROM nodes AS n
+            WHERE n.role = 'Repeater'
+            AND EXISTS (
+                SELECT 1
+                FROM paths AS p
+                JOIN traces AS t ON t.path_id = p.id
+                WHERE p.target_node = n.public_key
+                AND t.snr_values IS NOT NULL
+            )"""
+        )
+        statistics["repeaters_reachable"] = c.fetchone()[0]
+
+        # Room Servers
+        c.execute("SELECT COUNT(*) FROM nodes WHERE role = 'Room Server'")
+        statistics["roomservers_rcvd_adverts"] = c.fetchone()[0]
+        c.execute(
+            """SELECT COUNT(*)
+            FROM nodes AS n
+            WHERE n.role = 'Room Server'
+            AND EXISTS (
+                SELECT 1
+                FROM paths AS p
+                JOIN traces AS t ON t.path_id = p.id
+                WHERE p.target_node = n.public_key
+                AND t.snr_values IS NOT NULL
+            )"""
+        )
+        statistics["roomservers_reachable"] = c.fetchone()[0]
+
+        # Anzahl geprüfter Pfade (inkl. Sub-Pfade) = Einträge in paths
+        c.execute("SELECT COUNT(*) FROM paths")
+        statistics["checked_paths"] = c.fetchone()[0]
+
         conn.close()
 
         node_meta_local = {}
@@ -576,6 +637,80 @@ def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None):
                 ],
             ),
             html.Div(
+                id="stats-container",
+                style={"margin-top": "16px"},
+                children=[
+                    html.Table(
+                        style={"border-collapse": "collapse", "width": "100%", "max-width": "1000px"},
+                        children=[
+                            html.Thead(
+                                children=html.Tr(
+                                    children=[
+                                        html.Th("", style={"text-align": "left", "border-bottom": "1px solid #ccc", "padding": "4px"}),
+                                        html.Th("Adverts received", style={"text-align": "center", "border-bottom": "1px solid #ccc", "padding": "4px"}),
+                                        html.Th("Reachable Nodes", style={"text-align": "right", "border-bottom": "1px solid #ccc", "padding": "4px"}),
+                                    ]
+                                )
+                            ),
+                            html.Tbody(
+                                children=[
+                                    html.Tr(
+                                        children=[
+                                            html.Td("Chat Nodes", style={"padding": "4px", "border-bottom": "1px solid #eee"}),
+                                            html.Td(id="stat-chatnodes-rcvd", style={"padding": "4px", "border-bottom": "1px solid #eee", "text-align": "center"}),
+                                            html.Td(id="stat-chatnodes-reach", style={"padding": "4px", "border-bottom": "1px solid #eee", "text-align": "right"}),
+                                        ]
+                                    ),
+                                    html.Tr(
+                                        children=[
+                                            html.Td("Repeaters", style={"padding": "4px", "border-bottom": "1px solid #eee"}),
+                                            html.Td(id="stat-repeaters-rcvd", style={"padding": "4px", "border-bottom": "1px solid #eee", "text-align": "center"}),
+                                            html.Td(id="stat-repeaters-reach", style={"padding": "4px", "border-bottom": "1px solid #eee", "text-align": "right"}),
+                                        ]
+                                    ),
+                                    html.Tr(
+                                        children=[
+                                            html.Td("Room Servers", style={"padding": "4px", "border-bottom": "1px solid #eee"}),
+                                            html.Td(id="stat-roomservers-rcvd", style={"padding": "4px", "border-bottom": "1px solid #eee", "text-align": "center"}),
+                                            html.Td(id="stat-roomservers-reach", style={"padding": "4px", "border-bottom": "1px solid #eee", "text-align": "right"}),
+                                        ]
+                                    ),
+                                ]
+                            ),
+                        ],
+                    ),
+                    html.P(id="stat-checked-paths", style={"margin-top": "12px"}),
+                    html.H3("Nodes without geo location:", style={"margin-top": "16px"}),
+                    html.Table(
+                        style={"border-collapse": "collapse", "width": "100%", "max-width": "1000px"},
+                        children=[
+                            html.Thead(
+                                children=html.Tr(
+                                    children=[
+                                        html.Th("Name", style={"text-align": "left", "border-bottom": "1px solid #ccc", "padding": "4px"}),
+                                        html.Th("Role", style={"text-align": "left", "border-bottom": "1px solid #ccc", "padding": "4px"}),
+                                        html.Th("Public-Key", style={"text-align": "left", "border-bottom": "1px solid #ccc", "padding": "4px"}),
+                                        html.Th("Contact-QR-Code", style={"text-align": "left", "border-bottom": "1px solid #ccc", "padding": "4px"}),
+                                    ]
+                                )
+                            ),
+                            html.Tbody(
+                                children=[
+                                    html.Tr(
+                                        children=[
+                                            html.Td("", style={"padding": "4px", "border-bottom": "1px solid #eee"}),
+                                            html.Td("", style={"padding": "4px", "border-bottom": "1px solid #eee"}),
+                                            html.Td("", style={"padding": "4px", "border-bottom": "1px solid #eee"}),
+                                            html.Td("", style={"padding": "4px", "border-bottom": "1px solid #eee"}),
+                                        ]
+                                    )
+                                ]
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+            html.Div(
                 id="node-details-overlay",
                 style={
                     "margin": "16px",
@@ -609,6 +744,13 @@ def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None):
 
     @app.callback(
         Output("node-layer", "children"),
+        Output("stat-chatnodes-rcvd", "children"),
+        Output("stat-chatnodes-reach", "children"),
+        Output("stat-repeaters-rcvd", "children"),
+        Output("stat-repeaters-reach", "children"),
+        Output("stat-roomservers-rcvd", "children"),
+        Output("stat-roomservers-reach", "children"),
+        Output("stat-checked-paths", "children"),
         Input("reachable-filter", "value"),
         State("node-meta-store", "data"),
     )
@@ -618,6 +760,7 @@ def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None):
         def val_ok(val):
             return val not in (None, 0, 0.0)
 
+        # read nodes for markers
         markers = []
         for meta in node_meta_store.values():
             if show_reachable_only and meta.get("reachable", 0) == 0:
@@ -661,7 +804,16 @@ def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None):
                         }
                     )
                 )
-        return markers
+        return (
+            markers,
+            statistics["chatnodes_rcvd_adverts"],
+            statistics["chatnodes_reachable"],
+            statistics["repeaters_rcvd_adverts"],
+            statistics["repeaters_reachable"],
+            statistics["roomservers_rcvd_adverts"],
+            statistics["roomservers_reachable"],
+            f"Checked {statistics['checked_paths']} paths including sub-paths.",
+        )
 
 
     return app
