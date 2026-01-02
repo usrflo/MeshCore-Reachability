@@ -907,25 +907,23 @@ def dash_server_thread(db_path: str, stop_event: threading.Event, maptiler_api_k
     # Wir starten den Server einfach und verlassen uns auf Prozessende.
     print("[dash] Starting Dash server on http://0.0.0.0:5342 ...")
     app.run(host="0.0.0.0", port=5342, debug=False)
-
+    
 
 # --- main() -------
 
 
-async def main():
-    """Hier wird nur noch die Thread-Orchestrierung übernommen.
+async def main(stop_event: threading.Event):
 
-    Erwartet, dass Argumente (Port, DB-Pfad) bereits wie gewünscht definiert sind.
-    """
+    # Erwartet, dass Argumente (Port, DB-Pfad) bereits wie gewünscht definiert sind.
     parser = argparse.ArgumentParser(description="MeshCore Reachability Graph")
     parser.add_argument("-p", "--port", required=True, help="LoRa-Device serial port")
     parser.add_argument("--db", default="mcreach.sqlite", help="SQLite database file")
+    parser.add_argument("--headless", action="store_true", required=False, help="Run packet collection without web-ui")
     parser.add_argument("-ak", "--maptiler_api_key", dest="maptiler_api_key", help="Optional MapTiler API key for background map", required=False)
     args = parser.parse_args()
 
     db_path = args.db
     maptiler_api_key = args.maptiler_api_key
-    stop_event = threading.Event()
 
     # Kombinierter Thread: Adverts einsammeln, Pfade auswerten und Traces sequenziell ausführen
     t_collect_paths = threading.Thread(
@@ -936,18 +934,23 @@ async def main():
 
     t_collect_paths.start()
 
-    print("[main] Collector thread started. Launching Dash app in main process (Ctrl+C to stop)...")
+    print("[main] Collector thread started")
 
-    try:
+    if args.headless:
+        while True:
+            await asyncio.sleep(2)
+    else:
         dash_server_thread(db_path, stop_event, maptiler_api_key)
-    except KeyboardInterrupt:
-        print("[main] Stopping ...")
-        stop_event.set()
-        # kurze Wartezeit für sauberes Beenden des Collector-Threads
-        await asyncio.sleep(2)
-
+        print("[main] Launching Dash app")
 
 if __name__ == "__main__":
     import asyncio as _asyncio
 
-    _asyncio.run(main())
+    stop_event = threading.Event()
+    
+    try:
+        print("[main] Started app (Ctrl+C to stop)...")
+        _asyncio.run(main(stop_event))
+    except KeyboardInterrupt:
+        print("[main] Stopping ...")
+        stop_event.set()
