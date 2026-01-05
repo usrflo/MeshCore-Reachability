@@ -630,11 +630,11 @@ def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None, home_l
     if coords:
         center_lat = (min_lat + max_lat) / 2
         center_lon = (min_lon + max_lon) / 2
-        zoom = 9
+        zoom = 8
     else:
         center_lat = home_latitude
         center_lon = home_longitude
-        zoom = 9
+        zoom = 8
 
     app = dash.Dash(__name__)
     app.layout = dcc.Loading(
