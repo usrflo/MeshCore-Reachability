@@ -929,6 +929,7 @@ async def main(stop_event: threading.Event):
     parser.add_argument("-p", "--port", required=True, help="LoRa-Device serial port")
     parser.add_argument("--db", default="mcreach.sqlite", help="SQLite database file")
     parser.add_argument("--headless", action="store_true", required=False, help="Run packet collection without web-ui")
+    parser.add_argument("--guionly", action="store_true", required=False, help="Run web-ui without packet collection")
     parser.add_argument("-ak", "--maptiler_api_key", dest="maptiler_api_key", help="Optional MapTiler API key for background map", required=False)
     args = parser.parse_args()
 
@@ -941,10 +942,14 @@ async def main(stop_event: threading.Event):
         args=(args.port, db_path, stop_event),
         daemon=True,
     )
+    
+    if args.headless and args.guionly:
+        print("Error in arguments: disable either packet collection (--headless) or gui (--guionly), not both.")
+        return
 
-    t_collect_paths.start()
-
-    print("[main] Collector thread started")
+    if not args.guionly:
+        t_collect_paths.start()
+        print("[main] Collector thread started")
 
     if args.headless:
         while True:
