@@ -46,8 +46,8 @@ You may also need any libraries required by those packages (see their respective
 Clone this repository and install the Python dependencies into your environment (virtualenv recommended):
 
 ```bash
-git clone <your-repo-url>.git
-cd <your-repo-directory>
+git clone https://github.com/usrflo/MeshCore-Reachability.git
+cd MeshCore-Reachability
 
 # Example: use a virtual environment
 python3 -m venv .venv
