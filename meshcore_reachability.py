@@ -141,13 +141,24 @@ def write_node_to_db(conn: sqlite3.Connection, public_key, name, role, latitude,
 # --- Kombinierter Thread: Adverts sammeln und Pfade verarbeiten ----------
 
 
-def advert_and_path_thread(port: str, db_path: str, stop_event: threading.Event):
+def advert_and_path_thread(port: str, db_path: str, stop_event: threading.Event, home_latitude: float | None = None, home_longitude: float | None = None, checkradius_km: float | None = None):
     """Sammelt MeshCore-Adverts und testet die Erreichbarkeit der Quelle über send_msg und ACK"""
 
     async def _run():
         mc: MeshCore | None = None
         subscription = None
         last_advert_hour = datetime.now().hour  # track last full hour when advert was sent
+
+        def _distance_km(lat1, lon1, lat2, lon2):
+            if None in (lat1, lon1, lat2, lon2):
+                return None
+            from math import radians, sin, cos, sqrt, atan2
+            R = 6371.0
+            dlat = radians(lat2 - lat1)
+            dlon = radians(lon2 - lon1)
+            a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
+            c = 2 * atan2(sqrt(a), sqrt(1 - a))
+            return R * c
 
         async def handle_rf_packet(event):
             nonlocal mc, subscription, last_advert_hour
@@ -180,6 +191,19 @@ def advert_and_path_thread(port: str, db_path: str, stop_event: threading.Event)
                         # print(f"  Location: {latitude}, {longitude}")
                     write_node_to_db(conn, advert.public_key, name, role, latitude, longitude, formatPath(packet.path))
 
+                    # radius-beschränkung für weitere Verarbeitung
+                    inside_radius = True
+                    dist = None
+                    if checkradius_km is not None and home_latitude is not None and home_longitude is not None:
+                        if latitude is not None and longitude is not None:
+                            dist = _distance_km(home_latitude, home_longitude, latitude, longitude)
+                            inside_radius = dist is None or dist <= checkradius_km
+                        else:
+                            inside_radius = True
+
+                    if dist is not None:
+                        print(f"Distance from home: {dist:.2f} km (radius limit: {checkradius_km} km) -> {'inside' if inside_radius else 'outside'}")
+
                     # send out advert once per full hour so peering chat nodes can respond
                     current_hour = datetime.now().hour
                     if last_advert_hour is None or current_hour != last_advert_hour:
@@ -188,8 +212,11 @@ def advert_and_path_thread(port: str, db_path: str, stop_event: threading.Event)
                         print("Sent hourly flood advert so peers can respond upon requests")
                         await asyncio.sleep(3)
 
-                    # process the foreign advert
-                    await process_advert(role, advert.public_key, packet.path)
+                    # process the foreign advert nur falls im Radius (oder ohne Geo-Location)
+                    if inside_radius:
+                        await process_advert(role, advert.public_key, packet.path)
+                    else:
+                        print("Skipping advert processing for node outside radius constraint")
                     # now listen to RX log events again
                     subscription = mc.subscribe(EventType.RX_LOG_DATA, handle_rf_packet)
                 else:
@@ -463,7 +490,7 @@ def _insert_trace_result(conn: sqlite3.Connection, path_id: int, snr_values: str
 # --- Thread 3: Visualisierung (Dash + Cytoscape) --------------------------
 
 
-def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None, home_latitude: float | None = None, home_longitude: float | None = None):
+def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None, home_latitude: float | None = None, home_longitude: float | None = None, checkradius_km: float | None = None):
     mclink_qr_cache: dict[str, str] = {}
     statistics: dict[str,str] = {"chatnodes_rcvd_adverts":"", "chatnodes_reachable":"",
                                  "repeaters_rcvd_adverts":"", "repeaters_reachable":"",
@@ -622,7 +649,7 @@ def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None, home_l
             dcc.Checklist(
                 id="reachable-filter",
                 # : bidirectional, checked latest path from adverts
-                options=[{"label": "show reachable nodes only", "value": "reachable_only"}],
+                options=[{"label": "show reachable nodes only; the checks are limited to nodes inside the given radius", "value": "reachable_only"}],
                 value=[],
                 className="reachable-filter",
             ),
@@ -650,6 +677,7 @@ def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None, home_l
                                 zoomOffset=-1 if maptiler_api_key else 0,
                             ),
                             dl.LayerGroup(id="node-layer"),
+                            dl.LayerGroup(id="radius-layer"),
                             dl.Marker(
                                 id="home-location-marker",
                                 position=map_coords_to_latlon(home_longitude, home_latitude),
@@ -676,7 +704,7 @@ def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None, home_l
                                     children=[
                                         html.Th(""),
                                         html.Th("Adverts received"),
-                                        html.Th("Reachable Nodes"),
+                                        html.Th("Reachable Nodes inside check radius"),
                                     ],
                                 ),
                             ),
@@ -761,6 +789,7 @@ def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None, home_l
 
     @app.callback(
         Output("node-layer", "children"),
+        Output("radius-layer", "children"),
         Output("stat-chatnodes-rcvd", "children"),
         Output("stat-chatnodes-reach", "children"),
         Output("stat-repeaters-rcvd", "children"),
@@ -806,6 +835,22 @@ def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None, home_l
 
         # read nodes for markers
         markers = []
+
+        # radius circle (if provided)
+        radius_markers = []
+        if checkradius_km is not None and val_ok(home_latitude) and val_ok(home_longitude):
+            # Leaflet expects radius in meters
+            radius_m = checkradius_km * 1000.0
+            radius_markers.append(
+                dl.Circle(
+                    center=[home_latitude, home_longitude],
+                    radius=radius_m,
+                    color="black",
+                    fill=False,
+                    opacity=0.8,
+                    weight=2,
+                )
+            )
         for meta in node_meta_store.values():
             if show_reachable_only and meta.get("reachable", 0) == 0:
                 continue
@@ -906,6 +951,7 @@ def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None, home_l
 
         return (
             markers,
+            radius_markers,
             statistics["chatnodes_rcvd_adverts"],
             statistics["chatnodes_reachable"],
             statistics["repeaters_rcvd_adverts"],
@@ -920,9 +966,9 @@ def create_dash_app_from_db(db_path, maptiler_api_key: str | None = None, home_l
     return app
 
 
-def dash_server_thread(db_path: str, stop_event: threading.Event, maptiler_api_key: str | None = None, home_latitude: float | None = None, home_longitude: float | None = None):
+def dash_server_thread(db_path: str, stop_event: threading.Event, maptiler_api_key: str | None = None, home_latitude: float | None = None, home_longitude: float | None = None, checkradius_km: float | None = None):
     """Startet die Dash-Anwendung (blockierend in diesem Thread)."""
-    app = create_dash_app_from_db(db_path, maptiler_api_key=maptiler_api_key, home_latitude=home_latitude, home_longitude=home_longitude)
+    app = create_dash_app_from_db(db_path, maptiler_api_key=maptiler_api_key, home_latitude=home_latitude, home_longitude=home_longitude, checkradius_km=checkradius_km)
     # Dash selbst hat keine eingebaute Möglichkeit, über ein Event sauber zu stoppen.
     # Wir starten den Server einfach und verlassen uns auf Prozessende.
     print("[dash] Starting Dash server on http://0.0.0.0:5342 ...")
@@ -940,6 +986,7 @@ async def main(stop_event: threading.Event):
     parser.add_argument("--db", default="mcreach.sqlite", help="SQLite database file")
     parser.add_argument("-lat", "--latitude", dest="latitude", type=float, required=True, help="Latitude of home location, e.g. 47.73322")
     parser.add_argument("-lon", "--longitude", dest="longitude", type=float, required=True, help="Longitude of home location, e.g. 12.11043")
+    parser.add_argument("-rad", "--checkradius_km", dest="checkradius_km", type=float, default=200.0, help="limit path checks on nodes within this radius from the home location (in km) to reduce traffic")
     parser.add_argument("--headless", action="store_true", required=False, help="Run packet collection without web-ui")
     parser.add_argument("--guionly", action="store_true", required=False, help="Run web-ui without packet collection")
     parser.add_argument("-ak", "--maptiler_api_key", dest="maptiler_api_key", help="Optional MapTiler API key for background map", required=False)
@@ -949,11 +996,12 @@ async def main(stop_event: threading.Event):
     maptiler_api_key = args.maptiler_api_key
     home_latitude = args.latitude
     home_longitude = args.longitude
+    checkradius_km = args.checkradius_km
 
     # Kombinierter Thread: Adverts einsammeln, Pfade auswerten und Traces sequenziell ausführen
     t_collect_paths = threading.Thread(
         target=advert_and_path_thread,
-        args=(args.port, db_path, stop_event),
+        args=(args.port, db_path, stop_event, home_latitude, home_longitude, checkradius_km),
         daemon=True,
     )
     
@@ -969,7 +1017,7 @@ async def main(stop_event: threading.Event):
         while True:
             await asyncio.sleep(2)
     else:
-        dash_server_thread(db_path, stop_event, maptiler_api_key, home_latitude, home_longitude)
+        dash_server_thread(db_path, stop_event, maptiler_api_key, home_latitude, home_longitude, checkradius_km)
         print("[main] Launching Dash app")
 
 if __name__ == "__main__":
