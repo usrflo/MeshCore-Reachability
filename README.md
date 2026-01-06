@@ -104,6 +104,8 @@ MeshCore Reachability Graph
 options:
   -h, --help            show this help message and exit
   -p PORT, --port PORT  LoRa-Device serial port
+  -ip IP, --host HOST   LoRa-Device at ip/host (needs to listen on port 5000)
+  --ble                 LoRa-Device ble address
   --db DB               SQLite database file (default: mcreach.sqlite)
   -lat LATITUDE, --latitude LATITUDE
                         Latitude of home location, e.g. 47.73322
