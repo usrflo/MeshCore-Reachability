@@ -154,6 +154,8 @@ def write_node_to_db(
 
 def advert_and_path_thread(
     port: str,
+    host: str,
+    ble: str,
     db_path: str,
     stop_event: threading.Event,
     home_latitude: float | None = None,
@@ -405,8 +407,16 @@ def advert_and_path_thread(
             # Open the database for this thread (schema already initialized in main)
             conn = sqlite3.connect(db_path, check_same_thread=False)
 
-            print(f"[collector] Connecting to {port}...")
-            mc = await MeshCore.create_serial(port, 115200)
+            if port:
+                print(f"[collector] Connecting to {port}...")
+                mc = await MeshCore.create_serial(port, 115200)
+            elif host:
+                print(f"[collector] Connecting to {host}...")
+                mc = await MeshCore.create_tcp(host, 5000)
+            elif ble:
+                print(f"[collector] Connecting to {ble}...")
+                mc = await MeshCore.create_ble(ble)
+
 
             # Forget all repeaters that were not updated in the last 2 days to free space
             days_ago_ts = int(time.time() - 2 * 24 * 60 * 60)
@@ -436,7 +446,7 @@ def advert_and_path_thread(
 
         finally:
             if mc is not None:
-                mc.disconnect()
+                await mc.disconnect()
             conn.close()
 
     asyncio.run(_run())
@@ -1143,7 +1153,11 @@ async def main(stop_event: threading.Event):
     """Parse CLI arguments, start collector thread and (optionally) the Dash UI."""
 
     parser = argparse.ArgumentParser(description="MeshCore Reachability Graph")
-    parser.add_argument("-p", "--port", required=True, help="LoRa-Device serial port")
+
+    parser.add_argument("-p", "--port", required=False, help="LoRa-Device serial port")
+    parser.add_argument("-ip", "--host", required=False, help="LoRa-Device host ip")
+    parser.add_argument("-ble", "--ble", required=False, help="LoRa-Device ble address")
+
     parser.add_argument(
         "--db", default="mcreach.sqlite", help="SQLite database file"
     )
@@ -1209,6 +1223,8 @@ async def main(stop_event: threading.Event):
         target=advert_and_path_thread,
         args=(
             args.port,
+            args.host,
+            args.ble,
             db_path,
             stop_event,
             home_latitude,
